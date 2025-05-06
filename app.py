@@ -1,78 +1,103 @@
-
-from flask import Flask, render_template, request, jsonify
-import joblib
-import os
+from flask import Flask, request, render_template
+from flask_cors import CORS
 import re
-import string
+import pickle
+import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 
-app = Flask(__name__)
-
-# Load models and vectorizers
-models = {
-    'amazon_sentiment': joblib.load('models/amazon_model.pkl'),
-    'corona_sentiment': joblib.load('models/corona_model.pkl'),
-    'fake_news': joblib.load('models/fake_model.pkl'),
-    'news_category': joblib.load('models/news_model.pkl'),
-    'sms_spam': joblib.load('models/sms_model.pkl'),
-}
-
-vectorizers = {
-    'amazon_sentiment': joblib.load('models/amazon_vectorizer.pkl'),
-    'corona_sentiment': joblib.load('models/corona_vectorizer.pkl'),
-    'fake_news': joblib.load('models/fake_vectorizer.pkl'),
-    'news_category': joblib.load('models/news_vectorizer.pkl'),
-    'sms_spam': joblib.load('models/sms_vectorizer.pkl'),
-}
-
+# Ensure NLTK stopwords are available
+nltk.data.path.append('nltk_data')
 stop_words = set(stopwords.words('english'))
 
+# Preprocessing functions
 def preprocess(text):
     text = str(text).lower()
-    text = re.sub(r"http\S+|www\S+", "", text)
-    text = re.sub(r"\d+", "", text)
+    text = re.sub(r"http\S+|www\S+", '', text)
     tokens = word_tokenize(text)
-    tokens = [w for w in tokens if w.isalpha()]
-    tokens = [w for w in tokens if w not in stop_words]
-    return ' '.join(tokens)
+    tokens = [word for word in tokens if word.isalpha()]
+    return ' '.join([word for word in tokens if word not in stop_words])
 
-@app.route("/")
-def index():
-    return render_template("index.html")
+# Load models and vectorizers
+with open("models/corona_model.pkl", "rb") as f:
+    corona_model = pickle.load(f)
+with open("models/corona_vectorizer.pkl", "rb") as f:
+    corona_vectorizer = pickle.load(f)
 
-@app.route("/predict", methods=["POST"])
+with open("models/sms_model.pkl", "rb") as f:
+    sms_model = pickle.load(f)
+with open("models/sms_vectorizer.pkl", "rb") as f:
+    sms_vectorizer = pickle.load(f)
+
+with open("models/fake_model.pkl", "rb") as f:
+    fake_model = pickle.load(f)
+with open("models/fake_vectorizer.pkl", "rb") as f:
+    fake_vectorizer = pickle.load(f)
+
+with open("models/amazon_model.pkl", "rb") as f:
+    amazon_model = pickle.load(f)
+with open("models/amazon_vectorizer.pkl", "rb") as f:
+    amazon_vectorizer = pickle.load(f)
+
+with open("models/news_model.pkl", "rb") as f:
+    news_model = pickle.load(f)
+with open("models/news_vectorizer.pkl", "rb") as f:
+    news_vectorizer = pickle.load(f)
+
+# Mapping dictionaries
+amazon_label_map = {'1': 'Negative', '2': 'Positive'}
+news_class_map = {
+    1: 'Social Issues / Law',
+    2: 'Sports',
+    3: 'Finance / Economy',
+    4: 'Science & Technology'
+}
+
+# Prediction routing logic
+def predict_task(text, task):
+    cleaned = preprocess(text)
+
+    if task == "corona_sentiment":
+        vec = corona_vectorizer.transform([cleaned])
+        pred = corona_model.predict(vec)[0]
+        return f"[Corona Sentiment] → {pred}"
+
+    elif task == "sms_spam":
+        vec = sms_vectorizer.transform([cleaned])
+        pred = sms_model.predict(vec)[0]
+        return "[Spam Detection] → SPAM" if pred == 1 else "[Spam Detection] → HAM (Not Spam)"
+
+    elif task == "fake_news":
+        vec = fake_vectorizer.transform([cleaned])
+        pred = fake_model.predict(vec)[0]
+        return "[Fake News Detection] → FAKE" if pred == 1 else "[Fake News Detection] → REAL"
+
+    elif task == "amazon_sentiment":
+        vec = amazon_vectorizer.transform([cleaned])
+        pred = amazon_model.predict(vec)[0]
+        return f"[Amazon Review Sentiment] → {amazon_label_map.get(pred, 'Unknown')}"
+
+    elif task == "news_category":
+        vec = news_vectorizer.transform([cleaned])
+        pred = news_model.predict(vec)[0]
+        return f"[News Classification] → {news_class_map.get(pred, 'Unknown')}"
+
+    return "Invalid task."
+
+# Flask app setup
+app = Flask(__name__)
+CORS(app)
+
+@app.route('/')
+def home():
+    return render_template('index.html')
+
+@app.route('/predict', methods=['POST'])
 def predict():
-    data = request.get_json()
-    task = data.get("task")
-    text = data.get("text")
-
-    if not task or not text:
-        return jsonify({"error": "Missing task or text"}), 400
-
-    if task not in models or task not in vectorizers:
-        return jsonify({"error": "Invalid task"}), 400
-
-    processed = preprocess(text)
-    vec = vectorizers[task].transform([processed])
-    pred = models[task].predict(vec)[0]
-
-    label_map = {
-        'amazon_sentiment': {'1': 'Negative', '2': 'Positive'},
-        'sms_spam': {0: 'HAM (Not Spam)', 1: 'SPAM'},
-        'fake_news': {0: 'REAL', 1: 'FAKE'},
-        'news_category': {
-            1: 'Social Issues / Politics',
-            2: 'Sports',
-            3: 'Finance / Economy',
-            4: 'Science & Technology'
-        }
-    }
-
-    if task in label_map:
-        pred = label_map[task].get(pred, str(pred))
-
-    return jsonify({"result": pred})
+    text = request.form.get('text')
+    task = request.form.get('task')
+    result = predict_task(text, task)
+    return render_template('index.html', prediction=result, input_text=text)
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=False)
