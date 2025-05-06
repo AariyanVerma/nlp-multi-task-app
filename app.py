@@ -1,37 +1,20 @@
-import nltk
 import os
-
-nltk_data_path = os.path.join(os.getcwd(), 'nltk_data')
-if not os.path.exists(nltk_data_path):
-    os.makedirs(nltk_data_path)
-
-nltk.download('punkt_tab', download_dir=nltk_data_path)
-nltk.data.path.append(nltk_data_path)
-
-
-
-
-from flask import Flask, request, render_template
-from flask_cors import CORS
-import re
-import pickle
 import nltk
+from flask import Flask, request, jsonify, render_template
+from flask_cors import CORS
+import pickle
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
+import string
 
-# Ensure NLTK stopwords are available
-nltk.data.path.append('nltk_data')
-stop_words = set(stopwords.words('english'))
+# Ensure NLTK data is downloaded on startup
+nltk.download('punkt')
+nltk.download('stopwords')
 
-# Preprocessing functions
-def preprocess(text):
-    text = str(text).lower()
-    text = re.sub(r"http\S+|www\S+", '', text)
-    tokens = word_tokenize(text)
-    tokens = [word for word in tokens if word.isalpha()]
-    return ' '.join([word for word in tokens if word not in stop_words])
+app = Flask(__name__)
+CORS(app)
 
-# Load models and vectorizers
+# Load all models and vectorizers
 with open("models/corona_model.pkl", "rb") as f:
     corona_model = pickle.load(f)
 with open("models/corona_vectorizer.pkl", "rb") as f:
@@ -57,60 +40,60 @@ with open("models/news_model.pkl", "rb") as f:
 with open("models/news_vectorizer.pkl", "rb") as f:
     news_vectorizer = pickle.load(f)
 
-# Mapping dictionaries
-amazon_label_map = {'1': 'Negative', '2': 'Positive'}
-news_class_map = {
-    1: 'Social Issues / Law',
-    2: 'Sports',
-    3: 'Finance / Economy',
-    4: 'Science & Technology'
-}
+# Preprocessing function
+def preprocess(text):
+    text = text.lower()
+    tokens = word_tokenize(text)
+    tokens = [t for t in tokens if t not in string.punctuation]
+    tokens = [t for t in tokens if t not in stopwords.words("english")]
+    return " ".join(tokens)
 
-# Prediction routing logic
+# Task-based prediction
 def predict_task(text, task):
     cleaned = preprocess(text)
 
-    if task == "corona_sentiment":
+    if task == "corona":
         vec = corona_vectorizer.transform([cleaned])
-        pred = corona_model.predict(vec)[0]
-        return f"[Corona Sentiment] → {pred}"
+        return corona_model.predict(vec)[0]
 
-    elif task == "sms_spam":
+    elif task == "sms":
         vec = sms_vectorizer.transform([cleaned])
-        pred = sms_model.predict(vec)[0]
-        return "[Spam Detection] → SPAM" if pred == 1 else "[Spam Detection] → HAM (Not Spam)"
+        return sms_model.predict(vec)[0]
 
-    elif task == "fake_news":
+    elif task == "fake":
         vec = fake_vectorizer.transform([cleaned])
-        pred = fake_model.predict(vec)[0]
-        return "[Fake News Detection] → FAKE" if pred == 1 else "[Fake News Detection] → REAL"
+        return fake_model.predict(vec)[0]
 
-    elif task == "amazon_sentiment":
+    elif task == "amazon":
         vec = amazon_vectorizer.transform([cleaned])
-        pred = amazon_model.predict(vec)[0]
-        return f"[Amazon Review Sentiment] → {amazon_label_map.get(pred, 'Unknown')}"
+        return amazon_model.predict(vec)[0]
 
-    elif task == "news_category":
+    elif task == "news":
         vec = news_vectorizer.transform([cleaned])
-        pred = news_model.predict(vec)[0]
-        return f"[News Classification] → {news_class_map.get(pred, 'Unknown')}"
+        return news_model.predict(vec)[0]
 
-    return "Invalid task."
+    else:
+        return "Invalid task."
 
-# Flask app setup
-app = Flask(__name__)
-CORS(app)
-
-@app.route('/')
+@app.route("/")
 def home():
-    return render_template('index.html')
+    return render_template("index.html")
 
-@app.route('/predict', methods=['POST'])
+@app.route("/predict", methods=["POST"])
 def predict():
-    text = request.form.get('text')
-    task = request.form.get('task')
-    result = predict_task(text, task)
-    return render_template('index.html', prediction=result, input_text=text)
+    try:
+        data = request.get_json()
+        text = data.get("text")
+        task = data.get("task")
+
+        if not text or not task:
+            return jsonify({"error": "Missing text or task"}), 400
+
+        result = predict_task(text, task)
+        return jsonify({"result": result})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(debug=False)
+    app.run(debug=True)
