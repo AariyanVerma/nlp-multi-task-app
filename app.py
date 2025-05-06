@@ -1,3 +1,15 @@
+import nltk
+import os
+
+nltk_data_path = os.path.join(os.getcwd(), 'nltk_data')
+if not os.path.exists(nltk_data_path):
+    os.makedirs(nltk_data_path)
+
+nltk.download('punkt_tab', download_dir=nltk_data_path)
+nltk.data.path.append(nltk_data_path)
+
+
+
 
 from flask import Flask, request, render_template
 from flask_cors import CORS
