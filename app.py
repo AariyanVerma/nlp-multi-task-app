@@ -1,8 +1,3 @@
-import nltk
-
-# Ensure required NLTK data is downloaded on server
-nltk.download('punkt')
-nltk.download('stopwords')
 
 from flask import Flask, request, render_template
 from flask_cors import CORS
